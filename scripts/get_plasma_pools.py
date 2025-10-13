@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import pygsheets
 import logging
+from dotenv import load_dotenv
 
 import os
 
@@ -33,6 +34,8 @@ def main(spreadsheet_name, worksheet_name):
     }
     """
 
+    # Service account file for Google Sheets
+    load_dotenv()
     SERVICE_FILE = os.getenv("SERVICE_ACCOUNT_FILE")
 
     logging.basicConfig(level=logging.INFO)
