@@ -98,6 +98,68 @@ def calculate_delta(events, start_timestamp, end_timestamp):
     return adds - removes
 
 
+def calculate_withdrawal_analysis(events, start_timestamp, end_timestamp):
+    """Calculate number of addresses responsible for 70% of withdrawals and the address if count = 1.
+
+    Args:
+        events: List of events already filtered by time range (from filter_events_by_range)
+        start_timestamp: Start timestamp for the period (for reference, events are already filtered)
+        end_timestamp: End timestamp for the period (for reference, events are already filtered)
+
+    Returns:
+        tuple: (count_of_addresses, address_if_count_is_1)
+    """
+    # Filter only REMOVE events (events are already filtered by time range)
+    remove_events = [event for event in events if event.get(
+        "type", "") == "REMOVE"]
+
+    if not remove_events:
+        return (0, "")
+
+    # Group by userAddress and sum valueUSD
+    user_totals = {}
+    for event in remove_events:
+        user_address = event.get("userAddress", "")
+        value_usd = float(event.get("valueUSD", 0) or 0.0)
+
+        if user_address:
+            if user_address not in user_totals:
+                user_totals[user_address] = 0.0
+            user_totals[user_address] += value_usd
+
+    if not user_totals:
+        return (0, "")
+
+    # Calculate total withdrawals
+    total_withdrawals = sum(user_totals.values())
+
+    if total_withdrawals == 0:
+        return (0, "")
+
+    # Sort users by total value descending
+    sorted_users = sorted(user_totals.items(),
+                          key=lambda x: x[1], reverse=True)
+
+    # Calculate cumulative percentage until reaching 70%
+    target_percentage = 0.70
+    cumulative_value = 0.0
+    address_count = 0
+
+    for user_address, user_total in sorted_users:
+        cumulative_value += user_total
+        address_count += 1
+
+        if cumulative_value / total_withdrawals >= target_percentage:
+            # If only one address is needed, return that address
+            address_if_one = user_address if address_count == 1 else ""
+            return (address_count, address_if_one)
+
+    # If we've gone through all addresses and still haven't reached 70%,
+    # return the count of all addresses
+    address_if_one = sorted_users[0][0] if address_count == 1 else ""
+    return (address_count, address_if_one)
+
+
 def main(spreadsheet_name, worksheet_name, nov_2nd_date="2025-11-02", nov_5th_date="2025-11-05"):
     # API parameters
     API_URL = "https://api-v3.balancer.fi"
@@ -345,12 +407,24 @@ def main(spreadsheet_name, worksheet_name, nov_2nd_date="2025-11-02", nov_5th_da
         delta_nov_2_to_5 = calculate_delta(
             events_nov_2_to_5, nov_2nd_ts, nov_5th_ts_end)
 
+        # Calculate withdrawal analysis for Nov 2nd to 5th
+        count_nov_2_to_5, address_nov_2_to_5 = calculate_withdrawal_analysis(
+            events_nov_2_to_5, nov_2nd_ts, nov_5th_ts_end)
+
         # Nov 5th to 7d ago: from Nov 5th 00:00:00 to 7d ago 23:59:59
         delta_nov_5_to_7d = calculate_delta(
             events_nov_5_to_7d, nov_5th_ts_start, seven_days_ago_ts)
 
+        # Calculate withdrawal analysis for Nov 5th to 7d ago
+        count_nov_5_to_7d, address_nov_5_to_7d = calculate_withdrawal_analysis(
+            events_nov_5_to_7d, nov_5th_ts_start, seven_days_ago_ts)
+
         # 7d ago to Today: from 7d ago 00:00:00 to Today 23:59:59
         delta_7d_to_today = calculate_delta(
+            events_7d_to_today, seven_days_ago_ts, today_ts)
+
+        # Calculate withdrawal analysis for 7d ago to Today
+        count_7d_to_today, address_7d_to_today = calculate_withdrawal_analysis(
             events_7d_to_today, seven_days_ago_ts, today_ts)
 
         # Debug logging for first few pools
@@ -366,10 +440,16 @@ def main(spreadsheet_name, worksheet_name, nov_2nd_date="2025-11-02", nov_5th_da
             "Pool": pool_symbol,
             "TVL (Nov 2nd)": tvl_nov_2nd,
             "Delta Remove-Add (Nov 2nd - 5th)": delta_nov_2_to_5,
+            "Addresses (70% removes Nov 2nd - 5th)": count_nov_2_to_5,
+            "Most remover (if 1 user Nov 2nd - 5th)": address_nov_2_to_5,
             "TVL (Nov 5th)": tvl_nov_5th,
             "Delta Remove-Add (Nov 5th - 7d ago)": delta_nov_5_to_7d,
+            "Addresses (70% removes Nov 5th - 7d ago)": count_nov_5_to_7d,
+            "Most remover (if 1 user Nov 5th - 7d ago)": address_nov_5_to_7d,
             "TVL (7d ago)": tvl_7d_ago,
             "Delta Remove-Add (7d ago - Today)": delta_7d_to_today,
+            "Addresses (70% removes 7d ago - Today)": count_7d_to_today,
+            "Most remover (if 1 user 7d ago - Today)": address_7d_to_today,
             "TVL (Today)": tvl_today,
             "Volume (24h)": volume_24h,
             "Swap Fee": swap_fee,
